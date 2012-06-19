@@ -4,6 +4,8 @@
 #
 # Recursive lcg copy command
 #
+#  dryrun, noclobber, streams added 20100723
+#   by David O'Callaghan <david.ocallaghan@cs.tcd.ie>
 
 #lcg_cp_prepare_params
 lcg_cp_prepare_params()
@@ -13,6 +15,10 @@ lcg_cp_prepare_params()
       then
         PARAMS=$PARAMS" --vo "$LFCRECCR_VO
       fi
+      if [ -n "${LFCRECCR_S}" ]
+      then
+        PARAMS=$PARAMS" -n "$LFCRECCR_S
+      fi
       if [ -n "${LFCRECCR_CP}" ]
       then
         PARAMS=$PARAMS" lfn:"$LFCRECCR_CP/$file
@@ -21,6 +27,16 @@ lcg_cp_prepare_params()
       then
         FILEPATH=$(echo $DIRPATH/$file" "$(pwd) |  awk '{ if(substr($1,1,1)=="/") print $1; else print $2"/"$1}')
         PARAMS=$PARAMS" file:"$FILEPATH       
+        if [ -f $FILEPATH ]
+        then
+            if [ -n "${LFCRECCR_NC}" ]
+            then
+                echo "Info: $FILEPATH already exists. Skipping."
+                PARAMS=" --version > /dev/null"
+            else 
+                echo "Warning: $FILEPATH already exists"
+            fi
+        fi
       fi      
       if [ -n "${LFCRECCR_FC}" ]
       then
@@ -37,6 +53,9 @@ parse_arguments()
   LFCRECCR_CP=
   LFCRECCR_V=
   LFCRECCR_TB=
+  LFCRECCR_S=1
+  LFCRECCR_NC=
+  LFCRECCR_DR=
   NEEDHELP="N"
   PARAM=
   for opt in $ARGS
@@ -50,6 +69,7 @@ parse_arguments()
         "LP" ) LFCRECCR_LP=$opt ;;
         "CP" ) LFCRECCR_CP=$opt ;;
         "FC" ) LFCRECCR_FC=$opt ;;        
+        "S" ) LFCRECCR_S=$opt ;;        
       esac 
       PARAM=
     fi
@@ -59,6 +79,9 @@ parse_arguments()
       "--lp"      | "-lp"  ) PARAM="LP"     ;;
       "--cp"      | "-cp"  ) PARAM="CP"     ;;
       "--fc"      | "-fc"  ) PARAM="FC"     ;;      
+      "--streams"      | "-s"  ) PARAM="S"     ;;      
+      "--noclobber"|"-nc"  ) LFCRECCR_NC="Y"     ;;      
+      "--dryrun"  | "-dr"  ) LFCRECCR_DR="Y"     ;;      
       "--help"    | "-h"   ) NEEDHELP="Y"   ;; 
       "--verbose" | "-v"   ) LFCRECCR_V="Y" ;;
     esac
@@ -71,7 +94,7 @@ show_usage()
   echo "----------"
   echo "LCG utils based recursive copy from file catalog utility"
   echo " "
-  echo "Usage: `basename $0` -vo <voname> -cp <catalog_path> -lp <local_filepath> [-fc <file_catalog>] [-v]"
+  echo "Usage: `basename $0` -vo <voname> -cp <catalog_path> -lp <local_filepath> [-fc <file_catalog>] [-s <num streams>] [-v] [-nc] [-dr]"
 }
 
 #check arguments
@@ -158,6 +181,12 @@ then
   echo "LFC         : "$LFCRECCR_FC
   echo "Local path  : "$LFCRECCR_LP
   echo "Catalog path: "$LFCRECCR_CP
+  echo "Streams:      "$LFCRECCR_S
+  echo "No overwrite: "$LFCRECCR_NC
+  if [ -n "${LFCRECCR_DR}" ]
+  then
+    echo "DRY RUN"
+  fi
   echo " "
 fi
 
@@ -188,7 +217,10 @@ else
     #
     # mkdir
     #
-    mkdir -p ${DIRPATH}    
+    if [ ! -n "${LFCRECCR_DR}" ]
+    then
+        mkdir -p ${DIRPATH}    
+    fi
     SUBDIRS=$(lfc-ls -l  ${LFCRECCR_CP} | awk '{ if(substr($1,1,1)=="d") print $9 }')
     if [ -n "$SUBDIRS" ]
     then
@@ -202,15 +234,30 @@ else
       then        
         VOPT="-v"
       fi
+      SOPT=
+      if [ -n "${LFCRECCR_S}" ]
+      then        
+        SOPT="-s "$LFCRECCR_S
+      fi
       FCOPT=
       if [ -n "${LFCRECCR_FC}" ]
       then        
         FCOPT="-fc "$LFCRECCR_FC
       fi
+      NCOPT=
+      if [ -n "${LFCRECCR_NC}" ]
+      then        
+        NCOPT="-nc "
+      fi
+      DROPT=
+      if [ -n "${LFCRECCR_DR}" ]
+      then        
+        DROPT="-dr "
+      fi
       CATALOGPATH=$(echo ${LFCRECCR_CP}/$dir | sed 's/\/\//\//g')
       LOCALPATH=$(echo ${DIRPATH}/$dir | sed 's/\/\//\//g')
       #recursive call to $0
-      $0 -vo $LFCRECCR_VO $VOPT $FCOPT $SEOPT $LFCRECCR_VO -lp $LOCALPATH -cp $CATALOGPATH -tb $LFCRECCR_TB
+      $0 -vo $LFCRECCR_VO $VOPT $DROPT $NCOPT $SOPT $FCOPT $SEOPT $LFCRECCR_VO -lp $LOCALPATH -cp $CATALOGPATH -tb $LFCRECCR_TB
     done
     #process files then
     FILES=$(lfc-ls -l  ${LFCRECCR_CP} | awk '{ if(substr($1,1,1)!="d" && substr($1,1,1)!="l") print $9 }')
@@ -226,7 +273,10 @@ else
       #
       # lcg-cp
       #
-      lcg-cp $PARAMS      
+      if [ ! -n "${LFCRECCR_DR}" ]
+      then
+          lcg-cp $PARAMS      
+      fi
     done
   elif [ "${FLAG}" != "d" -a  "${FLAG}" != "l"   ]
   then
@@ -238,7 +288,10 @@ else
     #
     # lcg-cp
     #
-    lcg-cp $PARAMS  
+    if [ ! -n "${LFCRECCR_DR}" ]
+    then
+        lcg-cp $PARAMS  
+    fi
   else
     echo "Error: The local path '"$LFCRECCR_LP"' is not valid"
   fi
