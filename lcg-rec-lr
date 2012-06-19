@@ -1,0 +1,237 @@
+#!/bin/sh
+#
+# lcg-rec-lr - David O'Callaghan 20120618 
+# based on
+# lcg-rec-cp - Riccardo Bruno 20070725
+#
+# Recursive lcg list replica command
+#
+#  dryrun, noclobber, streams added to lcg-rec-cp 20100723
+#   by David O'Callaghan <david.ocallaghan@cs.tcd.ie>
+
+#lcg_lr_prepare_params
+lcg_lr_prepare_params()
+{
+      PARAMS=
+      if [ -n "${LFCRECLR_VO}" ]
+      then
+        PARAMS=$PARAMS" --vo "$LFCRECLR_VO
+      fi
+      if [ -n "${LFCRECLR_CP}" ]
+      then
+        PARAMS=$PARAMS" lfn:"$LFCRECLR_CP/$file
+      fi
+      if [ -n "${LFCRECLR_FC}" ]
+      then
+        export LFC_HOST=$LFCRECLR_FC
+      fi
+}
+
+#parse arguments
+parse_arguments()
+{
+  LFCRECLR_VO=
+  LFCRECLR_FC=
+  LFCRECLR_LP=
+  LFCRECLR_CP=
+  LFCRECLR_V=
+  LFCRECLR_L=
+  LFCRECLR_TB=
+  NEEDHELP="N"
+  PARAM=
+  for opt in $ARGS
+  do 
+    OPTSIGN=$(echo ${opt} | awk '{ print substr($1,1,1) }') 
+    if [ -n "${PARAM}" -a "${OPTSIGN}" != "-"  ]
+    then
+      case $PARAM in
+        "TB" ) LFCRECLR_TB=$opt ;;
+        "VO" ) LFCRECLR_VO=$opt ;;
+        "LP" ) LFCRECLR_LP=$opt ;;
+        "CP" ) LFCRECLR_CP=$opt ;;
+        "FC" ) LFCRECLR_FC=$opt ;;        
+      esac 
+      PARAM=
+    fi
+    case $opt in
+      "--tb"      | "-tb"  ) PARAM="TB"     ;;
+      "--vo"      | "-vo"  ) PARAM="VO"     ;;
+      "--cp"      | "-cp"  ) PARAM="CP"     ;;
+      "--fc"      | "-fc"  ) PARAM="FC"     ;;      
+      "--help"    | "-h"   ) NEEDHELP="Y"   ;; 
+      "--verbose" | "-v"   ) LFCRECLR_V="Y" ;;
+      "--long" | "-l"   ) LFCRECLR_L="Y" ;;
+    esac
+  done
+}
+
+show_usage()
+{
+  echo "lcg-rec-lr"
+  echo "----------"
+  echo "LCG utils based recursive list replicas from file catalog utility"
+  echo " "
+  echo "Usage: `basename $0` -vo <voname> -cp <catalog_path> [-fc <file_catalog>] [-v] [-l]"
+}
+
+#check arguments
+check_arguments()
+{
+  if [ "${NEEDHELP}" != "Y" ]
+  then
+    ERROR=
+    NEWLN="\n"
+    TABSP="\t"
+    if [ -z "$LFCRECLR_TB" ]
+    then
+      LFCRECLR_TB=0
+    fi
+    if [ -z "${LFCRECLR_FC}" ]
+    then
+      if [ -n "${LFC_HOST}" ]
+      then
+         if [ -n "${LFCRECLR_V}" ]
+         then
+           ERROR=$ERROR$TABSP"Warning: Defafault LFC server: '"$LFC_HOST"' will be used"$NEWLN
+         fi
+      else
+        ERROR=$ERROR$TABSP"LFC_HOST environment variable or -fc option must be specified with a LFC host server"$NEWLN
+        NEEDHELP="Y"
+      fi
+    fi
+    if [ -z "${LFCRECLR_VO}" ]
+    then
+      ERROR=$ERROR$TABSP"you must specify a virtual organization"$NEWLN
+      NEEDHELP="Y"
+    fi
+    if [ -z "${LFCRECLR_CP}" ]
+    then
+      ERROR=$ERROR$TABSP"you must specify a catalog path"$NEWLN
+      NEEDHELP="Y"
+    fi
+    
+    if [ -n "${ERROR}"  -a $LFCRECLR_TB -eq 0 ]
+    then
+      echo "Errors:"
+      echo -e $ERROR    
+    fi
+  fi
+}
+
+calc_indlevel()
+{
+  LNTABS=
+  if [ $LFCRECLR_TB -gt 0 ]
+  then
+    for t in $(seq 1 $LFCRECLR_TB)
+    do
+      LNTABS=$LNTABS"\t"
+    done  
+  fi
+}
+
+#
+# lcg-rec-cp 
+#
+
+#parse the command line
+if [ $# -ne 0 ]
+then
+  ARGS=$*
+  parse_arguments
+  check_arguments  
+else
+  NEEDHELP="Y"
+fi
+
+#view verbose summary info
+if [ -n "${LFCRECLR_V}" -a "${LFCRECLR_TB}" == "0" ]
+then
+  echo "lcg-rec-cp"
+  echo "----------"
+  echo "VO          : "$LFCRECLR_VO
+  echo "LFC         : "$LFCRECLR_FC
+  echo "Catalog path: "$LFCRECLR_CP
+  echo " "
+fi
+
+#view help or execute
+if [ $NEEDHELP == "Y" ] 
+then 
+  show_usage
+else
+  #calculate indirection level
+  calc_indlevel
+  #directory or file
+  FLAG=$(lfc-ls -ld ${LFCRECLR_CP} | awk '{ print substr($1,1,1) }')
+  if [ "${FLAG}" == "d" ]
+  then
+    SUBDIRS=$(lfc-ls -l  ${LFCRECLR_CP} | awk '{ if(substr($1,1,1)=="d") print $9 }')
+    if [ -n "$SUBDIRS" ]
+    then
+      LFCRECLR_TB=$(($LFCRECLR_TB+1))
+    fi
+    for dir in $SUBDIRS
+    do  
+      #prepare arguments for the recursive call to $0    
+      VOPT=
+      if [ -n "${LFCRECLR_V}" ]
+      then        
+        VOPT="-v"
+      fi
+      LOPT=
+      if [ -n "${LFCRECLR_L}" ]
+      then        
+        LOPT="-l"
+      fi
+      FCOPT=
+      if [ -n "${LFCRECLR_FC}" ]
+      then        
+        FCOPT="-fc "$LFCRECLR_FC
+      fi
+      CATALOGPATH=$(echo ${LFCRECLR_CP}/$dir | sed 's/\/\//\//g')
+      #recursive call to $0
+      $0 -vo $LFCRECLR_VO $LOPT $VOPT $FCOPT $SEOPT $LFCRECLR_VO -cp $CATALOGPATH -tb $LFCRECLR_TB
+    done
+    #process files then
+    FILES=$(lfc-ls -l  ${LFCRECLR_CP} | awk '{ if(substr($1,1,1)!="d" && substr($1,1,1)!="l") print $9 }')
+    for file in $FILES
+    do      
+      #prepare PARAMS for lcg-lr
+      FILE=$file
+      lcg_lr_prepare_params
+      if [ -n "${LFCRECLR_V}" ]
+      then
+        echo -e $LNTABS"lcg-lr"$PARAMS
+      fi
+      #
+      # lcg-lr
+      #
+      if [ -n "${LFCRECLR_L}" ]
+      then
+        echo -n "${LFCRECLR_CP}/$FILE  "
+      fi
+      lcg-lr $PARAMS      
+    done
+  elif [ "${FLAG}" != "d" -a  "${FLAG}" != "l"   ]
+  then
+    lcg_lr_prepare_params
+    if [ -n "${LFCRECLR_V}" ]
+    then
+      echo -e $LNTABS"lcg-lr"$PARAMS
+    fi
+    #
+    # lcg-lr
+    #
+    if [ -n "${LFCRECLR_L}" ]
+    then
+      echo -n "${LFCRECLR_CP}/$FILE  "
+    fi
+    lcg-lr $PARAMS  
+  else
+    echo "Error: "
+  fi
+fi
+
+
+
