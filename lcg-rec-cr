@@ -1,0 +1,257 @@
+#!/bin/sh
+#
+# lcg-rec-cr
+#
+
+#lcg_cr_prepare_params
+lcg_cr_prepare_params()
+{
+      PARAMS=
+      if [ -n "${LFCRECCR_SE}" ]
+      then
+        PARAMS=$PARAMS" -d "$LFCRECCR_SE
+      fi
+      if [ -n "${LFCRECCR_VO}" ]
+      then
+        PARAMS=$PARAMS" --vo "$LFCRECCR_VO
+      fi
+      if [ -n "${LFCRECCR_LP}" ]
+      then
+        FILEPATH=$(echo $LFCRECCR_LP/$file" "$(pwd) |  awk '{ if(substr($1,1,1)=="/") print $1; else print $2"/"$1}') 
+        PARAMS=$PARAMS" file:"$FILEPATH       
+      fi
+      if [ -n "${LFCRECCR_CP}" ]
+      then
+        PARAMS=$PARAMS" -l lfn:"$DIRPATH/$file
+      fi
+      if [ -n "${LFCRECCR_FC}" ]
+      then
+        export LFC_HOST=$LFCRECCR_FC
+      fi
+}
+
+#parse arguments
+parse_arguments()
+{
+  LFCRECCR_VO=
+  LFCRECCR_FC=
+  LFCRECCR_LP=
+  LFCRECCR_CP=
+  LFCRECCR_V=
+  LFCRECCR_SE=
+  LFCRECCR_TB=
+  NEEDHELP="N"
+  PARAM=
+  for opt in $ARGS
+  do 
+    OPTSIGN=$(echo ${opt} | awk '{ print substr($1,1,1) }') 
+    if [ -n "${PARAM}" -a "${OPTSIGN}" != "-"  ]
+    then
+      case $PARAM in
+        "TB" ) LFCRECCR_TB=$opt ;;
+        "VO" ) LFCRECCR_VO=$opt ;;
+        "LP" ) LFCRECCR_LP=$opt ;;
+        "CP" ) LFCRECCR_CP=$opt ;;
+        "FC" ) LFCRECCR_FC=$opt ;;
+        "SE" ) LFCRECCR_SE=$opt ;;      
+      esac 
+      PARAM=
+    fi
+    case $opt in
+      "--tb"      | "-tb"  ) PARAM="TB"     ;;
+      "--vo"      | "-vo"  ) PARAM="VO"     ;;
+      "--lp"      | "-lp"  ) PARAM="LP"     ;;
+      "--cp"      | "-cp"  ) PARAM="CP"     ;;
+      "--fc"      | "-fc"  ) PARAM="FC"     ;;
+      "--se"      | "-se"  ) PARAM="SE"     ;;
+      "--help"    | "-h"   ) NEEDHELP="Y"   ;; 
+      "--verbose" | "-v"   ) LFCRECCR_V="Y" ;;
+    esac
+  done
+}
+
+show_usage()
+{
+  echo "lcg-rec-cr"
+  echo "----------"
+  echo "LCG utils based recursive copy and register to file catalog utility"
+  echo " "
+  echo "Usage: `basename $0` -vo <voname> -lp <local_filepath> -cp <catalog_path>  [-fc <file_catalog>] [-se <storage_element>] [-v]"
+}
+
+#check arguments
+check_arguments()
+{
+  if [ "${NEEDHELP}" != "Y" ]
+  then
+    ERROR=
+    NEWLN="\n"
+    TABSP="\t"
+    if [ -z "$LFCRECCR_TB" ]
+    then
+      LFCRECCR_TB=0
+    fi
+    if [ -z "${LFCRECCR_FC}" ]
+    then
+      if [ -n "${LFC_HOST}" ]
+      then
+         if [ -n "${LFCRECCR_V}" ]
+         then
+           ERROR=$ERROR$TABSP"Warning: Defafault LFC server: '"$LFC_HOST"' will be used"$NEWLN
+         fi
+      else
+        ERROR=$ERROR$TABSP"LFC_HOST environment variable or -fc option must be specified with a LFC host server"$NEWLN
+        NEEDHELP="Y"
+      fi
+    fi
+    if [ -z "${LFCRECCR_VO}" ]
+    then
+      ERROR=$ERROR$TABSP"you must specify a virtual organization"$NEWLN
+      NEEDHELP="Y"
+    fi
+    if [ -z "${LFCRECCR_LP}" ]
+    then
+      ERROR=$ERROR$TABSP"you must specify a local path"$NEWLN
+      NEEDHELP="Y"
+    fi
+    if [ -z "${LFCRECCR_CP}" ]
+    then
+      ERROR=$ERROR$TABSP"you must specify a catalog path"$NEWLN
+      NEEDHELP="Y"
+    fi
+  
+    if [ -n "${ERROR}"  -a $LFCRECCR_TB -eq 0 ]
+    then
+      echo "Errors:"
+      echo -e $ERROR    
+    fi
+  fi
+}
+
+calc_indlevel()
+{
+  LNTABS=
+  if [ $LFCRECCR_TB -gt 0 ]
+  then
+    for t in $(seq 1 $LFCRECCR_TB)
+    do
+      LNTABS=$LNTABS"\t"
+    done  
+  fi
+}
+
+#
+# lcg-rec-cr 
+#
+
+#parse the command line
+if [ $# -ne 0 ]
+then
+  ARGS=$*
+  parse_arguments
+  check_arguments  
+else
+  NEEDHELP="Y"
+fi
+
+#view verbose summary info
+if [ -n "${LFCRECCR_V}" -a "${LFCRECCR_TB}" == "0" ]
+then
+  echo "lcg-rec-cp"
+  echo "----------"
+  echo "VO          : "$LFCRECCR_VO
+  echo "LFC         : "$LFCRECCR_FC
+  echo "Local path  : "$LFCRECCR_LP
+  echo "Catalog path: "$LFCRECCR_CP
+  echo " "
+fi
+
+#view help or execute
+if [ $NEEDHELP == "Y" ] 
+then 
+  show_usage
+else
+  #calculate indirection level
+  calc_indlevel
+  #directory or file
+  if [ -d $LFCRECCR_LP ]
+  then
+    #create the directory in the catalog
+    if [ $LFCRECCR_TB -eq 0 ]
+    then   
+      TMPVAR=$(basename ${LFCRECCR_LP})
+      DIRPATH=$(echo ${LFCRECCR_CP}/$TMPVAR | sed 's/\/\//\//g')    
+    else
+      DIRPATH=$(echo ${LFCRECCR_CP} | sed 's/\/\//\//g')
+    fi
+    #process directories first
+    if [ -n "${LFCRECCR_V}" ]
+    then
+      echo -e $LNTABS"lfc-mkdir -p ${DIRPATH}"
+    fi
+    #
+    # lfc-mkdir
+    #
+    lfc-mkdir -p ${DIRPATH}
+    SUBDIRS=$(ls -l  ${LFCRECCR_LP} | awk '{ if(substr($1,1,1)=="d") print $9 }')
+    if [ -n "${SUBDIRS}" ]
+    then
+      LFCRECCR_TB=$(($LFCRECCR_TB+1))
+    fi
+    for dir in $SUBDIRS
+    do  
+      #prepare arguments to recursive call to $0    
+      VOPT=
+      if [ -n "${LFCRECCR_V}" ]
+      then        
+        VOPT="-v"
+      fi
+      FCOPT=
+      if [ -n "${LFCRECCR_FC}" ]
+      then        
+        FCOPT="-fc "$LFCRECCR_FC
+      fi
+      SEOPT=
+      if [ -n "${LFCRECCR_SE}" ]
+      then
+        SEOPT="-se "${LFCRECCR_SE}
+      fi
+      LOCALPATH=$(echo ${LFCRECCR_LP}/$dir | sed 's/\/\//\//g')
+      TMPVAR=$(basename ${LFCRECCR_LP}/$dir)
+      CATALOGPATH=$(echo ${DIRPATH}/${TMPVAR} | sed 's/\/\//\//g')
+      #recursive call to $0
+      $0 -vo $LFCRECCR_VO $VOPT $FCOPT $SEOPT $LFCRECCR_VO -lp $LOCALPATH -cp $CATALOGPATH -tb $LFCRECCR_TB
+    done
+    #process files then
+    FILES=$(ls -l  ${LFCRECCR_LP} | awk '{ if(substr($1,1,1)!="d" && substr($1,1,1)!="l") print $9 }')
+    for file in $FILES
+    do      
+      #prepare PARAMS for lcg-cr
+      lcg_cr_prepare_params
+      if [ -n "${LFCRECCR_V}" ]
+      then
+        echo -e $LNTABS"lcg-cr"$PARAMS
+      fi
+      # 
+      #lcg-cr
+      #
+      lcg-cr $PARAMS      
+    done
+  elif [ -f $LFCRECCR_LP ]
+  then
+    lcg_cr_prepare_params
+    if [ -n "${LFCRECCR_V}" ]
+    then
+      echo -e $LNTABS"lcg-cr"$PARAMS
+    fi
+    #
+    # lcg-cr
+    #
+    lcg-cr $PARAMS
+  else
+    echo "Error: The local path '"$LFCRECCR_LP"' is not valid"
+  fi
+fi
+
+
+

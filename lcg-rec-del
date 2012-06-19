@@ -1,0 +1,239 @@
+#!/bin/sh
+#
+# lcg-rec-del - Riccardo Bruno 20070725
+#
+# Recursive lcg del command; remove files from catalog and related replicas
+#
+
+#lcg_cp_prepare_params
+lcg_cp_prepare_params()
+{
+      PARAMS=
+      if [ -n "${LFCRECCR_VO}" ]
+      then
+        PARAMS=$PARAMS" --vo "$LFCRECCR_VO
+      fi
+      if [ -n "${LFCRECCR_CP}" ]
+      then
+        PARAMS=$PARAMS" lfn:"$DIRPATH/$file
+      fi
+      if [ -n "${LFCRECCR_FC}" ]
+      then
+        export LFC_HOST=$LFCRECCR_FC
+      fi
+}
+
+#parse arguments
+parse_arguments()
+{
+  LFCRECCR_VO=
+  LFCRECCR_FC=
+  LFCRECCR_CP=
+  LFCRECCR_V=
+  LFCRECCR_TB=
+  NEEDHELP="N"
+  PARAM=
+  for opt in $ARGS
+  do 
+    OPTSIGN=$(echo ${opt} | awk '{ print substr($1,1,1) }') 
+    if [ -n "${PARAM}" -a "${OPTSIGN}" != "-"  ]
+    then
+      case $PARAM in
+        "TB" ) LFCRECCR_TB=$opt ;;
+        "VO" ) LFCRECCR_VO=$opt ;;
+        "CP" ) LFCRECCR_CP=$opt ;;
+        "FC" ) LFCRECCR_FC=$opt ;;        
+      esac 
+      PARAM=
+    fi
+    case $opt in
+      "--tb"      | "-tb"  ) PARAM="TB"     ;;
+      "--vo"      | "-vo"  ) PARAM="VO"     ;;
+      "--cp"      | "-cp"  ) PARAM="CP"     ;;
+      "--fc"      | "-fc"  ) PARAM="FC"     ;;      
+      "--help"    | "-h"   ) NEEDHELP="Y"   ;; 
+      "--verbose" | "-v"   ) LFCRECCR_V="Y" ;;
+    esac
+  done
+}
+
+show_usage()
+{
+  echo "lcg-rec-del"
+  echo "----------"
+  echo "LCG utils based recursive delete from file catalog utility and related replicas"
+  echo " "
+  echo "Usage: `basename $0` -vo <voname> -cp <catalog_path> [-fc <file_catalog>] [-v]"
+}
+
+#check arguments
+check_arguments()
+{
+  if [ "${NEEDHELP}" != "Y" ]
+  then
+    ERROR=
+    NEWLN="\n"
+    TABSP="\t"
+    if [ -z "$LFCRECCR_TB" ]
+    then
+      LFCRECCR_TB=0
+    fi
+    if [ -z "${LFCRECCR_FC}" ]
+    then
+      if [ -n "${LFC_HOST}" ]
+      then
+         if [ -n "${LFCRECCR_V}" ]
+         then
+           ERROR=$ERROR$TABSP"Warning: Defafault LFC server: '"$LFC_HOST"' will be used"$NEWLN
+         fi
+      else
+        ERROR=$ERROR$TABSP"LFC_HOST environment variable or -fc option must be specified with a LFC host server"$NEWLN
+        NEEDHELP="Y"
+      fi
+    fi
+    if [ -z "${LFCRECCR_VO}" ]
+    then
+      ERROR=$ERROR$TABSP"you must specify a virtual organization"$NEWLN
+     NEEDHELP="Y"
+    fi
+    if [ -z "${LFCRECCR_CP}" ]
+    then
+      ERROR=$ERROR$TABSP"you must specify a catalog path"$NEWLN
+      NEEDHELP="Y"
+    fi
+    if [ -n "${ERROR}"  -a $LFCRECCR_TB -eq 0 ]
+    then
+      echo "Errors:"
+      echo -e $ERROR    
+    fi
+  fi
+}
+
+calc_indlevel()
+{
+  LNTABS=
+  if [ $LFCRECCR_TB -gt 0 ]
+  then
+    for t in $(seq 1 $LFCRECCR_TB)
+    do
+      LNTABS=$LNTABS"\t"
+    done  
+  fi
+}
+
+#
+# lcg-rec-cp 
+#
+
+#parse the command line
+if [ $# -ne 0 ]
+then
+  ARGS=$*
+  parse_arguments
+  check_arguments  
+else
+  NEEDHELP="Y"
+fi
+
+#view verbose summary info
+if [ -n "${LFCRECCR_V}" -a "${LFCRECCR_TB}" == "0" ]
+then
+  echo "lcg-rec-del"
+  echo "----------"
+  echo "VO          : "$LFCRECCR_VO
+  echo "LFC         : "$LFCRECCR_FC
+  echo "Catalog path: "$LFCRECCR_CP
+  echo " "
+fi
+
+#view help or execute
+if [ $NEEDHELP == "Y" ] 
+then 
+  show_usage
+else
+  #calculate indirection level
+  calc_indlevel
+  #directory or file
+  FLAG=$(lfc-ls -ld ${LFCRECCR_CP} | awk '{ print substr($1,1,1) }')
+  if [ "${FLAG}" == "d" ]
+  then
+    #directory name
+    #if [ $LFCRECCR_TB -eq 0 ]
+    #then   
+    #  TMPVAR=$(basename ${LFCRECCR_CP})
+    #  DIRPATH=$(echo ${LFCRECCR_CP}/$TMPVAR | sed 's/\/\//\//g')    
+    #else
+      DIRPATH=$(echo ${LFCRECCR_CP} | sed 's/\/\//\//g')
+    #fi
+    
+    #process files before
+    FILES=$(lfc-ls -l  ${LFCRECCR_CP} | awk '{ if(substr($1,1,1)!="d" && substr($1,1,1)!="l") print $9 }')
+    for file in $FILES
+    do      
+      #prepare PARAMS for lfc-cr
+      lcg_cp_prepare_params
+      if [ -n "${LFCRECCR_V}" ]
+      then
+        echo -e $LNTABS"lcg-del -a "$PARAMS
+      fi
+      #
+      # lcg-del
+      #
+      lcg-del -a $PARAMS      
+    done
+    
+    #delete directories then
+    SUBDIRS=$(lfc-ls -l  ${LFCRECCR_CP} | awk '{ if(substr($1,1,1)=="d") print $9 }')
+    if [ -n "$SUBDIRS" ]
+    then
+      LFCRECCR_TB=$(($LFCRECCR_TB+1))
+    fi
+    for dir in $SUBDIRS
+    do  
+      #prepare arguments for the recursive call to $0    
+      VOPT=
+      if [ -n "${LFCRECCR_V}" ]
+      then        
+        VOPT="-v"
+      fi
+      FCOPT=
+      if [ -n "${LFCRECCR_FC}" ]
+      then        
+        FCOPT="-fc "$LFCRECCR_FC
+      fi
+      CATALOGPATH=$(echo ${LFCRECCR_CP}/$dir | sed 's/\/\//\//g')
+      LOCALPATH=$(echo ${DIRPATH}/$dir | sed 's/\/\//\//g')
+      #recursive call to $0
+      $0 -vo $LFCRECCR_VO $VOPT $FCOPT $SEOPT $LFCRECCR_VO -lp $LOCALPATH -cp $CATALOGPATH -tb $LFCRECCR_TB
+    done
+   
+    #remove directory then    
+    #prepare PARAMS for lfc-del
+    file=
+    lcg_cp_prepare_params    
+    if [ -n "${LFCRECCR_V}" ]
+    then
+      echo -e $LNTABS"lfc-rm -r "$DIRPATH     
+    fi
+    #
+    # lfc-rm
+    #
+    lfc-rm -r $DIRPATH
+  elif [ "${FLAG}" != "d" -a  "${FLAG}" != "l" ]
+  then
+    lcg_cp_prepare_params
+    if [ -n "${LFCRECCR_V}" ]
+    then
+      echo -e $LNTABS"lcg-cp"$PARAMS
+    fi
+    #
+    # lcg-cp
+    #
+    lcg-cp $PARAMS  
+  else
+    echo "Error: The local path '"$LFCRECCR_LP"' is not valid"
+  fi
+fi
+
+
+
